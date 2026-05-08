@@ -65,13 +65,13 @@ jobs:
         run: |
           pwd
           ls
-          cd infra-centralizado/$APP_NAME
+          cd infra/$APP_NAME
 
           sed -i "s|image: .*|image: ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME:$IMAGE_TAG|" deployment.yaml
 
       - name: Commit and push
         run: |
-          cd infra-centralizado
+          cd infra
 
           git config user.name "viniciusmorao-dev"
           git config user.email "${{ secrets.GH_EMAIL }}"
