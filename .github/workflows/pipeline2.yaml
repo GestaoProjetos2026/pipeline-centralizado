@@ -46,7 +46,7 @@ jobs:
       # NOVO: Build e Push separados especificando o contexto de pasta (./frontend)
       - name: Build and Push Frontend Docker Image
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-frontend:$IMAGE_TAG ./frontend
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-frontend:$IMAGE_TAG .
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-frontend:$IMAGE_TAG
 
   job2:
