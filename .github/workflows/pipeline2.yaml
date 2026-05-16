@@ -1,0 +1,113 @@
+name: Pipeline CI/CD
+
+on:
+  workflow_call:
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_PASSWORD:
+        required: true
+      GH_TOKEN:
+        required: true
+      GH_EMAIL:
+        required: true
+      ARGOCD_SERVER:
+        required: true
+      ARGOCD_USERNAME:
+        required: true
+      ARGOCD_PASSWORD:
+        required: true
+        
+jobs:
+  job1:
+    name: Build and Push to Registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Source Code Management
+        uses: actions/checkout@v4 # Atualizado para v4 (melhor performance)
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      
+      - name: Set variables
+        run: |
+          echo "APP_NAME=${{ github.event.repository.name }}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+
+      # NOVO: Build e Push separados especificando o contexto de pasta (./backend)
+      - name: Build and Push Backend Docker Image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-backend:$IMAGE_TAG ./backend
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-backend:$IMAGE_TAG
+      
+      # NOVO: Build e Push separados especificando o contexto de pasta (./frontend)
+      - name: Build and Push Frontend Docker Image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-frontend:$IMAGE_TAG ./frontend
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-frontend:$IMAGE_TAG
+
+  job2:
+    name: Update Infra Repo and Deploy
+    runs-on: ubuntu-latest
+    needs: job1
+    steps:
+      - name: Checkout Infra Repo
+        uses: actions/checkout@v4
+        with:
+          repository: GestaoProjetos2026/infra-centralizado
+          token: ${{ secrets.GH_TOKEN }}
+          path: infra
+
+      - name: Set variables
+        run: |
+          echo "APP_NAME=${{ github.event.repository.name }}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+
+      # NOVO: Navega para a pasta da app e atualiza os DOIS deployments
+      - name: Update deployment image
+        run: |
+          cd infra/$APP_NAME
+
+          # Atualiza a tag no deployment do Backend
+          sed -i "s|image: .*|image: ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-backend:$IMAGE_TAG|" backend/deployment.yaml
+
+          # Atualiza a tag no deployment do Frontend
+          sed -i "s|image: .*|image: ${{ secrets.DOCKERHUB_USERNAME }}/$APP_NAME-frontend:$IMAGE_TAG|" frontend/deployment.yaml
+
+      - name: Commit and push
+        run: |
+          cd infra
+          git config user.name "github-actions[bot]" # Padrão mais seguro para rastreabilidade
+          git config user.email "${{ secrets.GH_EMAIL }}"
+          
+          git add .
+          git commit -m "Update $APP_NAME images to $IMAGE_TAG (Front & Back)"
+          git push
+
+  job3:
+    name: Deploy ArgoCD
+    runs-on: ubuntu-latest
+    needs: job2
+    steps:
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
+      
+      - name: Login ArgoCD
+        run: |
+          argocd login ${{ secrets.ARGOCD_SERVER }} \
+            --username ${{ secrets.ARGOCD_USERNAME }} \
+            --password ${{ secrets.ARGOCD_PASSWORD }} \
+            --insecure
+      
+      - name: Sync App
+        run: |
+          sleep 10
+          APP_NAME=${{ github.event.repository.name }}
+          # O ArgoCD fará refresh no Application apontando para a raiz do kustomize
+          argocd app get $APP_NAME --refresh
